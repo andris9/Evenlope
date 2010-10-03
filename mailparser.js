@@ -1,4 +1,6 @@
-var mime = require("./mime"),
+var EventEmitter = require('events').EventEmitter,
+    sys = require('sys'),
+    mime = require("./mime"),
     datetime = require("./datetime");
 
 var PARSE_HEADERS = 1,
@@ -180,37 +182,59 @@ MailParser.prototype.parseBodyEnd = function(){
 
 
 
-// StorageItem - load text into memory, put binary to Mongo GridStore
+// StorageItemStream - load text into memory, put binary to Mongo GridStore
 // return a) text - fulltext, b) binary - key
-function StorageItem(type, encoding, charset){
+function StorageItemStream(type, encoding, charset){
+    EventEmitter.call(this);
     this.type = type || "text";
     this.encoding = encoding || "7bit";
     this.charset = charset || "us-ascii";
     this.data = "";
 }
+sys.inherits(this.StorageItemStream, EventEmitter);
 
-StorageItem.prototype.feed = function(data){
+StorageItemStream.prototype.feed = function(data){
     if(this.type=="text")this.feedText(data);
     if(this.type=="binary")this.feedBinary(data);
 }
 
-StorageItem.prototype.feedText = function(data){
+StorageItemStream.prototype.feedText = function(data){
     this.data += data;
 }
 
-StorageItem.prototype.feedBinary = function(data){
+StorageItemStream.prototype.feedBinary = function(data){
     
 }
 
-StorageItem.prototype.end = function(){
+StorageItemStream.prototype.end = function(){
     if(this.type=="text"){
         if(this.encoding=="quoted-printable")
             this.data = mime.decodeQuotedPrintable(this.data, false, this.charset);
         if(this.encoding=="base64")
             this.data = mime.decodeBase64(this.data, this.charset);
-        return this.data;
     }
+    this.emit("end", this.data);
 }
+
+
+// base64 stream decoder
+this.Base64Stream = function(){
+    EventEmitter.call(this);
+    this.current = "";
+}
+sys.inherits(this.Base64Stream, EventEmitter);
+
+this.Base64Stream.prototype.push = function(data){
+    var remainder = 0;
+    this.current += data.replace(/[^\w+\/=]/g,'');
+    this.emit("stream", new Buffer(this.current.substr(0, this.current.length - this.current.length % 4),"base64"));
+    this.current = (remainder=this.current.length % 4)?this.current.substr(- remainder):"";
+}
+
+this.Base64Stream.prototype.end = function(){
+    this.emit("end");
+}
+
 
 function parseHeaderLine(line){
     if(!line)
