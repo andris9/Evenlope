@@ -51,6 +51,16 @@ SMTPServer.prototype.setUpRaiCommands = function(){
 }
 
 
+SMTPServer.prototype.receiveHeaders = function(headers){
+    console.log("Mail headers:")
+    console.log(headers)
+}
+
+SMTPServer.prototype.receiveBody = function(body){
+    console.log("Mail body:")
+    console.log(body)
+}
+
 SMTPServer.prototype.commands = {
     HELO: function(data, response, client){
         var domain = data && data.trim();
@@ -164,15 +174,17 @@ SMTPServer.prototype.commands = {
                 return response("503 Error: No valid recipients");
         
             client.data.mailParser = new mailparser.MailParser(client.data.mailFrom, client.data.rcptList);
+            client.data.mailParser.on("headers", this.receiveHeaders.bind(this));
+            client.data.mailParser.on("body", this.receiveBody.bind(this));
+            
             return response("354 End data with <CR><LF>.<CR><LF>", true);
         }else{ // STREAM
-            // stream ends with \r\n.\r\n and all occurances of \r\n. in the text are replaced with \r\n..
             if(data.substr(-5)=="\r\n.\r\n"){
-                client.data.mailParser.feed(data.substr(0,(data.length-5).replace(/\r\n\.\./g,"\r\n.")));
+                client.data.mailParser.feed(data.substr(0,(data.length-5)));
                 client.data.mailParser.end();
-                response("250 OK: Queued as 12345");
+                response("250 OK Mail received");
             }else
-                client.data.mailParser.feed(data.replace(/\r\n\.\./g,"\r\n."));
+                client.data.mailParser.feed(data);
         }
     },
     
