@@ -186,6 +186,7 @@ this.decodeQuotedPrintable = function(str, mimeWord, charset){
         str = str.replace(/_/g," ");
     }else{
         str = str.replace(/=\r\n/gm,'');
+        str = str.replace(/=$/,"");
     }
     if(charset == "UTF-8")
         str = decodeURIComponent(str.replace(/=/g,"%"));

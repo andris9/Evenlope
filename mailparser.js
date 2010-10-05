@@ -13,7 +13,7 @@ MailParser = function(mailFrom, rcptTo){
     this.headerStr = "";
  
     this.headers = {};
-    this.bodyData = {defaultBody:"", attachments:[]};
+    this.bodyData = {bodyText:"", bodyHTML:"", attachments:[]};
     
     this.state = PARSE_HEADERS;
 }
@@ -71,8 +71,11 @@ MailParser.prototype.analyzeHeaders = function(){
     this.headers.charset = parts.charset || "us-ascii";
     
     // mime-boundary
+    this.headers.multipart = false;
+    this.headers.mimeBoundary = false;
     if(this.headers.contentType.substr(0,"multipart/".length)=="multipart/"){
         this.headers.mimeBoundary = parts.boundary;
+        this.headers.multipart = true;
     }
     
     // message ID
@@ -159,28 +162,48 @@ MailParser.prototype.analyzeHeaders = function(){
 
 MailParser.prototype.parseBodyStart = function(data){
     this.mimeContents = false;
-    
+    this.remainder = ""; // somehow need to differentiate if the mime-moundary
+                            // is broken (divided into two parts) on transmission
     this.parseBody(data);
 }
 
 MailParser.prototype.parseBody = function(data){
     var pos;
     
-    if(this.headers.mimeBoundary){
-        pos  = data.indexOf("--"+this.headers.mimeBoundary);
-        if(pos>=0){
-            if(!this.mimeContents) // between mime attachments
-                this.bodyData.defaultBody += data.substr(0,pos).trim();
-            else{// end mime part
-                
-            }
+    data = this.remainder + data;
+    
+    if(this.headers.multipart){
+        pos = data.indexOf("--"+this.headers.mimeBoundary);
+        if(!this.mimeContents && pos>=0){
+            pos += "--"+this.headers.mimeBoundary.length;
+            this.mimeContents = true;
         }
     }else{
-        
+        this.bodyData.bodyText += data;
     }
 }
 
 MailParser.prototype.parseBodyEnd = function(){
+    
+    if(!this.headers.multipart && this.bodyData.bodyText){
+        switch(this.headers.contentTransferEncoding.toLowerCase()){
+            case "quoted-printable":
+                this.bodyData.bodyText = mime.decodeQuotedPrintable(this.bodyData.bodyText, false, this.headers.charset);
+                break;
+            case "base64":
+                this.bodyData.bodyText = mime.decodeBase64(this.bodyData.bodyText, false, this.headers.charset);
+                break;
+        }
+        this.bodyData.bodyText = this.bodyData.bodyText.trim();
+        if(this.headers.contentType=="text/html"){
+            this.bodyData.bodyHTML = this.bodyData.bodyText;
+            this.bodyData.bodyText = false;
+        }
+    }
+    
+    if(this.bodyData.bodyText && !!this.bodyData.bodyHTML)
+        this.bodyData.bodyText = stripHTML(this.bodyData.bodyText);
+    
     this.emit("body",this.bodyData);
     return false;
 }
@@ -223,7 +246,7 @@ DataStore.prototype.end = function(){
 
 
 // base64 stream decoder
-Base64Stream = function(){
+function Base64Stream(){
     EventEmitter.call(this);
     this.current = "";
 }
@@ -242,6 +265,69 @@ Base64Stream.prototype.end = function(){
     this.emit("end");
 }
 
+
+function stripHTML(str){
+    str = str.replace(/\r?\n/g," ");
+    str = str.replace(/<(?:\/p|br.*|\/tr|\/table|\/div)>/g,"\n");
+
+    // hide newlines
+    str = str.replace(/\r?\n/g,"\u0000\u0000");
+    
+    // H1-H6
+    str = str.replace(/<[hH]\d[^>]*>(.*?)<\/[hH]\d[^>]*>/g,function(a,b){
+        var line = "";
+        b = b.replace(/<[^>]*>/g," ");
+        b = b.replace(/\s\s+/g," ");
+        b = b.trim();
+        
+        if(!b)
+            return "";
+        for(var i=0, len = b.length; i<len; i++){
+            line+="-";
+        }
+        return b+"\n"+line+"\n\n";
+    });
+
+    // LI
+    str = str.replace(/<li[^>]*>(.*?)<\/?(?:li|ol|ul)[^>]*>/ig,function(a,b){
+        b = b.replace(/<[^>]*>/g," ");
+        b = b.replace(/\s\s+/g," ");
+        b = b.trim();
+        
+        if(!b)
+            return "";
+        return "®®®®* "+b+"\n";
+    });
+
+    // PRE
+    str = str.replace(/<pre[^>]*>(.*?)<\/pre[^>]*>/ig,function(a,b){
+        b = b.replace(/<[^>]*>/g," ");
+        b = b.replace(/\s\s+/g," ");
+        b = b.trim();
+        
+        if(!b)
+            return "";
+
+        b = b.replace(/[ \t]*\n[ \t]*/g,"\n®®®®®®®®");
+        
+        return "\n®®®®®®®®"+b.trim()+"\n\n";
+    });
+
+    // restore 
+    str = str.replace(/\s*\u0000\u0000\s*/g,"\n");
+    
+    // remove all remaining html tags
+    str = str.replace(/<[^>]*>/g," ");
+    // remove duplicate spaces
+    str = str.replace(/[ ][ ]+/g," ");
+    // remove spaces before and after newlines
+    str = str.replace(/[ \t]*\n[ \t]*/g,"\n");
+    // remove more than 2 newlines in a row
+    str = str.replace(/\n\n+/g,"\n\n");
+    // restore hidden spaces (four (r) signs for two spaces)
+    str = str.replace(/®®®®/g,"  ");
+    return str.trim();
+}
 
 function parseHeaderLine(line){
     if(!line)
