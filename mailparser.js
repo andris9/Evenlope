@@ -27,7 +27,7 @@ MailParser.prototype.feed = function(data){
         data = this.parseHeaders(data);
         this.parseBodyStart(data);
     }else if(this.state == PARSE_BODY){
-        data = this.parseBody(data, first);
+        data = this.parseBody(data);
     }
 }
 
@@ -69,6 +69,9 @@ MailParser.prototype.analyzeHeaders = function(){
     
     // charset
     this.headers.charset = parts.charset || "us-ascii";
+
+    // format=fixed|flowed (RFC2646)
+    this.headers.format = parts.format && parts.format.toLowerCase() || "fixed";
     
     // mime-boundary
     this.headers.multipart = false;
@@ -161,23 +164,55 @@ MailParser.prototype.analyzeHeaders = function(){
 }
 
 MailParser.prototype.parseBodyStart = function(data){
-    this.mimeContents = false;
-    this.remainder = ""; // somehow need to differentiate if the mime-moundary
-                            // is broken (divided into two parts) on transmission
+    this.body = {
+        mimeContents: false,
+        headersComplete: false,
+        headers: "",
+        i:0,
+        list:[]
+    }
     this.parseBody(data);
 }
 
 MailParser.prototype.parseBody = function(data){
-    var pos;
-    
-    data = this.remainder + data;
-    
+
     if(this.headers.multipart){
-        pos = data.indexOf("--"+this.headers.mimeBoundary);
-        if(!this.mimeContents && pos>=0){
-            pos += "--"+this.headers.mimeBoundary.length;
-            this.mimeContents = true;
-        }
+        var pos = pos2 = i = 0;
+        do{
+            if(this.body.mimeContents){
+                
+                // handle headers
+                if(!this.body.headersComplete){
+                    if((pos2 = data.indexOf("\r\n\r\n", pos))>=0){
+                        this.body.headers += data.substring(pos, pos2);
+                        pos = pos2+4;
+                        this.body.headersComplete = true;
+                        this.body.headerObj = mime.parseHeaders(this.body.headers.trim());
+                        this.body.headers = "";
+                        
+                        this.body.list.push("HEADERS FOR ATTACHMENT #"+(++i)+":\n"+sys.inspect(this.body.headerObj, true, 5));
+                    }else{
+                        this.body.headers += data.substr(pos);
+                        break;
+                    }
+                }
+
+                // handle body
+                // todo
+            }
+            
+            pos = data.indexOf("--"+this.headers.mimeBoundary, pos);
+            if(pos>=0){
+                pos += ("--"+this.headers.mimeBoundary).length;
+                this.body.headersComplete = false;
+                this.body.headers = "";
+                this.body.mimeContents = true;
+                if(data.substr(pos,2)=="--"){
+                    // last boundary
+                    return;
+                }
+            }
+        }while(pos>=0);
     }else{
         this.bodyData.bodyText += data;
     }
@@ -205,6 +240,7 @@ MailParser.prototype.parseBodyEnd = function(){
         this.bodyData.bodyText = stripHTML(this.bodyData.bodyText);
     
     this.emit("body",this.bodyData);
+    console.log(this.body.list.join("\n\n"));
     return false;
 }
 
@@ -268,12 +304,12 @@ Base64Stream.prototype.end = function(){
 
 function stripHTML(str){
     str = str.replace(/\r?\n/g," ");
-    str = str.replace(/<(?:\/p|br.*|\/tr|\/table|\/div)>/g,"\n");
+    str = str.replace(/<(?:\/p|br|\/tr|\/table|\/div)>/g,"\n");
 
-    // hide newlines
-    str = str.replace(/\r?\n/g,"\u0000\u0000");
+    // hide newlines with two 00 chars (enables multiline matches)
+    str = str.replace(/\r?\n/g,"-\u0000\u0000-");
     
-    // H1-H6
+    // H1-H6, add underline
     str = str.replace(/<[hH]\d[^>]*>(.*?)<\/[hH]\d[^>]*>/g,function(a,b){
         var line = "";
         b = b.replace(/<[^>]*>/g," ");
@@ -288,7 +324,7 @@ function stripHTML(str){
         return b+"\n"+line+"\n\n";
     });
 
-    // LI
+    // LI, indent by 2 spaces + *
     str = str.replace(/<li[^>]*>(.*?)<\/?(?:li|ol|ul)[^>]*>/ig,function(a,b){
         b = b.replace(/<[^>]*>/g," ");
         b = b.replace(/\s\s+/g," ");
@@ -296,10 +332,10 @@ function stripHTML(str){
         
         if(!b)
             return "";
-        return "®®®®* "+b+"\n";
+        return "-®®®®-* "+b+"\n";
     });
 
-    // PRE
+    // PRE, indent by 4 spaces
     str = str.replace(/<pre[^>]*>(.*?)<\/pre[^>]*>/ig,function(a,b){
         b = b.replace(/<[^>]*>/g," ");
         b = b.replace(/\s\s+/g," ");
@@ -308,13 +344,13 @@ function stripHTML(str){
         if(!b)
             return "";
 
-        b = b.replace(/[ \t]*\n[ \t]*/g,"\n®®®®®®®®");
+        b = b.replace(/[ \t]*\n[ \t]*/g,"\n-®®®®--®®®®-");
         
-        return "\n®®®®®®®®"+b.trim()+"\n\n";
+        return "\n-®®®®--®®®®-"+b.trim()+"\n\n";
     });
 
     // restore 
-    str = str.replace(/\s*\u0000\u0000\s*/g,"\n");
+    str = str.replace(/\s*-\u0000\u0000-\s*/g,"\n");
     
     // remove all remaining html tags
     str = str.replace(/<[^>]*>/g," ");
@@ -325,7 +361,7 @@ function stripHTML(str){
     // remove more than 2 newlines in a row
     str = str.replace(/\n\n+/g,"\n\n");
     // restore hidden spaces (four (r) signs for two spaces)
-    str = str.replace(/®®®®/g,"  ");
+    str = str.replace(/-®®®®-/g,"  ");
     return str.trim();
 }
 
