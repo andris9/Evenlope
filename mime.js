@@ -370,9 +370,8 @@ function toCharset(charset, buffer){
  * NB! For UTF-8 use decodeURIComponent and for Latin 1 decodeURL instead 
  **/
 function decodeBytestreamUrlencoding(encoded_string){
-
-    var c, i, j=0, buffer_length = encoded_string.length - 
-                            (encoded_string.match(/%/g).length*2),
+    var c, i, j=0, prcnts = encoded_string.match(/%/g) || "",
+            buffer_length = encoded_string.length - (prcnts.length*2),
         buffer = new Buffer(buffer_length);
 
     for(var i=0; i<encoded_string.length; i++){

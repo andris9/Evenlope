@@ -12,8 +12,11 @@ MailParser = function(mailFrom, rcptTo){
     this.rcptTo = rcptTo;
     this.headerStr = "";
  
+    this.waitFor = 0;
+    this.receivedAll = false;
+    
     this.headers = {};
-    this.bodyData = {bodyText:"", bodyHTML:"", attachments:[]};
+    this.bodyData = {bodyText:"", bodyHTML:"", bodyAlternate:[], attachments:[]};
     
     this.state = PARSE_HEADERS;
 }
@@ -32,6 +35,9 @@ MailParser.prototype.feed = function(data){
 }
 
 MailParser.prototype.end = function(){
+    if(this.waitFor || !this.receivedAll)
+        return;
+    
     if(this.state == PARSE_BODY){
         this.parseBodyEnd();
     }
@@ -44,7 +50,9 @@ MailParser.prototype.parseHeaders = function(data){
         this.headerStr += data.substr(0, pos);
         body = data.substr(pos+4);
         this.headerObj = mime.parseHeaders(this.headerStr);
-        this.analyzeHeaders();
+        this.analyzeHeaders(this.headerObj, this.headers);
+        delete this.headerObj; // not needed anymore
+        delete this.headerStr; // just ditch it
         this.emit("headers", this.headers);
         this.state = PARSE_BODY;
     }else
@@ -52,124 +60,138 @@ MailParser.prototype.parseHeaders = function(data){
     return body;
 }
 
-MailParser.prototype.analyzeHeaders = function(){
+MailParser.prototype.analyzeHeaders = function(headerObj, headers){
     var parts, headersUsed = [];
     
     // mime version
     headersUsed.push("mime-version");
-    this.headers.useMime = !!parseFloat(this.headerObj["mime-version"] && this.headerObj["mime-version"][0]);
+    headers.useMime = !!parseFloat(headerObj["mime-version"] && headerObj["mime-version"][0]);
     
     // content type
     headersUsed.push("content-type");
     parts = {};
-    if(this.headerObj["content-type"]){
-        parts = parseHeaderLine(this.headerObj["content-type"] && this.headerObj["content-type"][0]);
+    if(headerObj["content-type"]){
+        parts = parseHeaderLine(headerObj["content-type"] && headerObj["content-type"][0]);
     }
-    this.headers.contentType = parts.defaultValue && parts.defaultValue.toLowerCase() || "text/plain";
+    headers.contentType = parts.defaultValue && parts.defaultValue.toLowerCase() || "text/plain";
     
     // charset
-    this.headers.charset = parts.charset || "us-ascii";
+    headers.charset = parts.charset || "us-ascii";
 
     // format=fixed|flowed (RFC2646)
-    this.headers.format = parts.format && parts.format.toLowerCase() || "fixed";
+    headers.format = parts.format && parts.format.toLowerCase() || "fixed";
+    
+    // filename
+    headers.filename = parts.name && parts.name.replace(/['"]/g,"").trim() || false;
     
     // mime-boundary
-    this.headers.multipart = false;
-    this.headers.mimeBoundary = false;
-    if(this.headers.contentType.substr(0,"multipart/".length)=="multipart/"){
-        this.headers.mimeBoundary = parts.boundary;
-        this.headers.multipart = true;
+    headers.multipart = false;
+    headers.mimeBoundary = false;
+    if(headers.contentType.substr(0,"multipart/".length)=="multipart/"){
+        headers.mimeBoundary = parts.boundary.replace(/['"]/g,"").trim();
+        headers.multipart = true;
     }
     
     // message ID
     headersUsed.push("message-id");
     parts = {};
-    if(this.headerObj["message-id"]){
-        parts = parseHeaderLine(this.headerObj["message-id"] && this.headerObj["message-id"][0]);
+    if(headerObj["message-id"]){
+        parts = parseHeaderLine(headerObj["message-id"] && headerObj["message-id"][0]);
     }
-    this.headers.messageId = (parts.defaultValue || "").replace(/^</, '').replace(/>*$/, '');
+    headers.messageId = (parts.defaultValue || "").replace(/^</, '').replace(/>*$/, '');
     
     // date
     headersUsed.push("date");
     parts = {};
-    if(this.headerObj["date"]){
-        parts = parseHeaderLine(this.headerObj["date"] && this.headerObj["date"][0]);
+    if(headerObj["date"]){
+        parts = parseHeaderLine(headerObj["date"] && headerObj["date"][0]);
     }
-    this.headers.messageDate = parts.defaultValue && datetime.strtotime(parts.defaultValue)*1000 || Date.now();
+    headers.messageDate = parts.defaultValue && datetime.strtotime(parts.defaultValue)*1000 || Date.now();
     
     // content-transfer-encoding
     headersUsed.push("content-transfer-encoding");
     parts = {};
-    if(this.headerObj["content-transfer-encoding"]){
-        parts = parseHeaderLine(this.headerObj["content-transfer-encoding"] && this.headerObj["content-transfer-encoding"][0]);
+    if(headerObj["content-transfer-encoding"]){
+        parts = parseHeaderLine(headerObj["content-transfer-encoding"] && headerObj["content-transfer-encoding"][0]);
     }
-    this.headers.contentTransferEncoding = parts.defaultValue || "7bit";
+    headers.contentTransferEncoding = parts.defaultValue || "7bit";
     
     // from
     headersUsed.push("from");
-    this.headers.addressesFrom = [];
-    if(this.headerObj["from"]){
-        for(var i=0, len = this.headerObj["from"].length;i<len; i++){
-            this.headers.addressesFrom = this.headers.addressesFrom.concat(mime.parseAddresses(this.headerObj["from"][i]));
+    headers.addressesFrom = [];
+    if(headerObj["from"]){
+        for(var i=0, len = headerObj["from"].length;i<len; i++){
+            headers.addressesFrom = headers.addressesFrom.concat(mime.parseAddresses(headerObj["from"][i]));
         }
     }
     
     // reply-to
     headersUsed.push("reply-to");
-    this.headers.addressesReplyTo = [];
-    if(this.headerObj["reply-to"]){
-        for(var i=0, len = this.headerObj["reply-to"].length;i<len; i++){
-            this.headers.addressesReplyTo = this.headers.addressesReplyTo.concat(mime.parseAddresses(this.headerObj["reply-to"][i]));
+    headers.addressesReplyTo = [];
+    if(headerObj["reply-to"]){
+        for(var i=0, len = headerObj["reply-to"].length;i<len; i++){
+            headers.addressesReplyTo = headers.addressesReplyTo.concat(mime.parseAddresses(headerObj["reply-to"][i]));
         }
     }
     
     // to
     headersUsed.push("to");
-    this.headers.addressesTo = [];
-    if(this.headerObj["to"]){
-        for(var i=0, len = this.headerObj["to"].length;i<len; i++){
-            this.headers.addressesTo = this.headers.addressesTo.concat(mime.parseAddresses(this.headerObj["to"][i]));
+    headers.addressesTo = [];
+    if(headerObj["to"]){
+        for(var i=0, len = headerObj["to"].length;i<len; i++){
+            headers.addressesTo = headers.addressesTo.concat(mime.parseAddresses(headerObj["to"][i]));
         }
     }
     
     // cc
     headersUsed.push("cc");
-    this.headers.addressesCc = [];
-    if(this.headerObj["cc"]){
-        for(var i=0, len = this.headerObj["cc"].length;i<len; i++){
-            this.headers.addressesCc = this.headers.addressesCc.concat(mime.parseAddresses(this.headerObj["cc"][i]));
+    headers.addressesCc = [];
+    if(headerObj["cc"]){
+        for(var i=0, len = headerObj["cc"].length;i<len; i++){
+            headers.addressesCc = headers.addressesCc.concat(mime.parseAddresses(headerObj["cc"][i]));
         }
     }
     
     // subject
     headersUsed.push("subject");
-    if(this.headers.useMime)
-        this.headers.subject = mime.decodeMimeWord(this.headerObj["subject"] && this.headerObj["subject"][0] || "");
+    if(headers.useMime)
+        headers.subject = mime.decodeMimeWord(headerObj["subject"] && headerObj["subject"][0] || "");
     else
-        this.headers.subject = this.headerObj["subject"] && this.headerObj["subject"][0] || "";
+        headers.subject = headerObj["subject"] && headerObj["subject"][0] || "";
    
-    this.headers.secondary = [];
-    var keys = Object.keys(this.headerObj);
+    // content-disposition
+    headersUsed.push("content-disposition");
+    parts = {};
+    if(headerObj["content-disposition"]){
+        parts = parseHeaderLine(headerObj["content-disposition"] && headerObj["content-disposition"][0]);
+    }
+    headers.contentDisposition = parts.defaultValue || false;
+    
+    if(!headers.filename && parts.filename)
+        headers.filename = parts.filename.replace(/['"]/g,"").trim();
+    
+    headers.secondary = [];
+    var keys = Object.keys(headerObj);
     for(var i=0, len=keys.length; i<len; i++){
         if(headersUsed.indexOf(keys[i])<0){
             var row = {};
             row.name = keys[i];
-            row.value = this.headerObj[keys[i]];
-            this.headers.secondary.push(row);
+            row.value = headerObj[keys[i]];
+            headers.secondary.push(row);
         }
     }
-    
-    delete this.headerObj; // not needed anymore
-    delete this.headerStr; // just ditch it
 }
 
 MailParser.prototype.parseBodyStart = function(data){
     this.body = {
         mimeContents: false,
         headersComplete: false,
-        headers: "",
+        headerStr: "",
+        headerObj: {},
+        headers: {},
         i:0,
-        list:[]
+        list:[],
+        ds: null
     }
     this.parseBody(data);
 }
@@ -177,38 +199,79 @@ MailParser.prototype.parseBodyStart = function(data){
 MailParser.prototype.parseBody = function(data){
 
     if(this.headers.multipart){
-        var pos = pos2 = i = 0;
+        var pos = pos2 = 0, parts, pos3;
         do{
+            pos3=false;
             if(this.body.mimeContents){
                 
                 // handle headers
-                if(!this.body.headersComplete){
+                if(!this.body.headerStrComplete){
                     if((pos2 = data.indexOf("\r\n\r\n", pos))>=0){
-                        this.body.headers += data.substring(pos, pos2);
+                        this.body.headerStr += data.substring(pos, pos2);
                         pos = pos2+4;
-                        this.body.headersComplete = true;
-                        this.body.headerObj = mime.parseHeaders(this.body.headers.trim());
-                        this.body.headers = "";
+                        this.body.headerStrComplete = true;
+                        this.body.headerObj = mime.parseHeaders(this.body.headerStr.trim());
                         
-                        this.body.list.push("HEADERS FOR ATTACHMENT #"+(++i)+":\n"+sys.inspect(this.body.headerObj, true, 5));
+                        this.body.headers = {};
+                        this.analyzeHeaders(this.body.headerObj, this.body.headers);
+                        
+                        console.log(sys.inspect(this.body.headers))
+                        
+                        
+                        if(
+                            this.body.headers.contentType.substr(0,"text/".length)=="text/" ||
+                            this.body.headers.contentType.substr(0,"multipart/".length)=="multipart/"
+                        )this.waitFor++;
+                        
+                        
+                        if(this.body.headers.contentType.substr(0,"text/".length)=="text/"){
+                            this.body.ds = new DataStore("text", this.body.headers.contentTransferEncoding, this.body.headers.charset);
+                            this.setUpDSCallback(this.body.headers);
+                        }
+                        
+                        if(this.body.headers.contentType.substr(0,"multipart/".length)=="multipart/"){
+                            this.body.ds = new MailParser();
+                            this.setUpMPCallback(this.body.headers);
+                            this.body.ds.feed(this.body.headerStr.trim()+"\r\n\r\n");
+                            console.log("SENT TO CHILD:")
+                            console.log(this.body.headerStr+"\r\n\r\n");
+                        }
+                        
+                        this.body.headerStr = "";
+                        this.body.list.push("HEADERS FOR ATTACHMENT #"+(++this.body.i)+":\n"+sys.inspect(this.body.headers, true, 5));
                     }else{
-                        this.body.headers += data.substr(pos);
+                        this.body.headerStr += data.substr(pos);
                         break;
                     }
                 }
 
+                if(this.body.ds){
+                    pos3 = data.indexOf("--"+this.headers.mimeBoundary, pos);
+                    console.log("FEEDING CHILD:")
+                    console.log(pos3>=0?data.substring(pos,pos3):data.substr(pos))
+                    this.body.ds.feed(pos3>=0?data.substring(pos,pos3):data.substr(pos));
+                    if(pos3>=0){
+                        console.log("FEED END")
+                        this.body.ds.end();
+                        this.body.ds = null;
+                    }
+                }
+                
                 // handle body
                 // todo
+                // if multipart, create new MailParser, otherwise new DataStore
+                
             }
             
-            pos = data.indexOf("--"+this.headers.mimeBoundary, pos);
+            pos = pos3!==false?pos3:data.indexOf("--"+this.headers.mimeBoundary, pos);
             if(pos>=0){
                 pos += ("--"+this.headers.mimeBoundary).length;
-                this.body.headersComplete = false;
-                this.body.headers = "";
+                this.body.headerStrComplete = false;
+                this.body.headerStr = "";
                 this.body.mimeContents = true;
                 if(data.substr(pos,2)=="--"){
                     // last boundary
+                    this.receivedAll = true;
                     return;
                 }
             }
@@ -216,6 +279,67 @@ MailParser.prototype.parseBody = function(data){
     }else{
         this.bodyData.bodyText += data;
     }
+}
+
+MailParser.prototype.setUpDSCallback = function(headers){
+    this.body.ds.on("end", (function(data){
+        var done = false;
+        if(!headers.contentDisposition){
+            // body
+            switch(headers.contentType){
+                case "text/plain":
+                    if(!this.bodyData.bodyText){
+                        this.bodyData.bodyText = data;
+                        done = true;
+                    }
+                    break;
+                case "text/html":
+                    if(!this.bodyData.bodyHTML){
+                        this.bodyData.bodyHTML = data;
+                        done = true;
+                    }
+                    break;
+            }
+            if(!done)
+                this.bodyData.bodyAlternate.push({
+                    contentType: headers.contentType,
+                    body: data
+                });
+        }else{
+            // attachments
+            this.bodyData.attachments.push({
+                contentType: headers.contentType,
+                contentDisposition: headers.contentDisposition,
+                filename: headers.filename,
+                body: data
+            });
+        }
+        
+        if(!(--this.waitFor)){
+            this.end();
+        }
+    }).bind(this));
+}
+
+
+MailParser.prototype.setUpMPCallback = function(headers){
+    this.body.ds.on("headers", (function(data){
+        console.log("RECEIVED FROM CHILD (HEADERS):")
+        console.log(sys.inspect(data, false, 5));
+    }).bind(this));
+    this.body.ds.on("body", (function(data){
+        console.log("RECEIVED FROM CHILD (BODY):")
+        console.log(sys.inspect(data, false, 5));
+        
+        this.bodyData.attachments.push({
+            contentType: headers.contentType,
+            body: data
+        });
+        
+        if(!(--this.waitFor)){
+            this.end();
+        }
+    }).bind(this));
 }
 
 MailParser.prototype.parseBodyEnd = function(){
@@ -239,8 +363,9 @@ MailParser.prototype.parseBodyEnd = function(){
     if(this.bodyData.bodyText && !!this.bodyData.bodyHTML)
         this.bodyData.bodyText = stripHTML(this.bodyData.bodyText);
     
-    this.emit("body",this.bodyData);
     console.log(this.body.list.join("\n\n"));
+    
+    this.emit("body",this.bodyData);
     return false;
 }
 
@@ -252,7 +377,7 @@ function DataStore(type, encoding, charset){
     EventEmitter.call(this);
     this.type = type || "text";
     this.encoding = encoding || "7bit";
-    this.headers.charset = charset || "us-ascii";
+    this.charset = charset || "us-ascii";
     this.data = "";
 }
 sys.inherits(DataStore, EventEmitter);
@@ -273,10 +398,12 @@ DataStore.prototype.feedBinary = function(data){
 DataStore.prototype.end = function(){
     if(this.type=="text"){
         if(this.encoding=="quoted-printable")
-            this.data = mime.decodeQuotedPrintable(this.data, false, this.headers.charset);
+            this.data = mime.decodeQuotedPrintable(this.data, false, this.charset).trim();
         if(this.encoding=="base64")
-            this.data = mime.decodeBase64(this.data, this.headers.charset);
+            this.data = mime.decodeBase64(this.data, this.charset).trim();
     }
+    console.log("CACHED DATA:")
+    console.log(sys.inspect(this.data, true, 5))
     this.emit("end", this.data);
 }
 

@@ -1,7 +1,8 @@
 var rai = require("./rai"),
     auth = require("./auth"),
     dns = require('dns'),
-    mailparser = require('./mailparser');
+    mailparser = require('./mailparser'),
+    sys = require('sys');
 
 var __incrementator = 0;
 
@@ -53,12 +54,12 @@ SMTPServer.prototype.setUpRaiCommands = function(){
 
 SMTPServer.prototype.receiveHeaders = function(headers){
     console.log("Mail headers:")
-    console.log(headers)
+    console.log(sys.inspect(headers,false, 5));
 }
 
 SMTPServer.prototype.receiveBody = function(body){
-    console.log("Mail body:")
-    console.log(body)
+    console.log("FINAL MAIL BODY:")
+    console.log(sys.inspect(body, false, 5));
 }
 
 SMTPServer.prototype.commands = {
