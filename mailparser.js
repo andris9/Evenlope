@@ -197,8 +197,6 @@ MailParser.prototype.parseBodyStart = function(data){
         headerStr: "",
         headerObj: {},
         headers: {},
-        i:0,
-        list:[],
         ds: null
     }
     this.parseBody(data);
@@ -223,8 +221,6 @@ MailParser.prototype.parseBody = function(data){
                         this.body.headers = {};
                         this.analyzeHeaders(this.body.headerObj, this.body.headers);
                         
-                        console.log(sys.inspect(this.body.headers))
-                        
                         this.waitFor++;
                         
                         // TEXT
@@ -238,8 +234,6 @@ MailParser.prototype.parseBody = function(data){
                             this.body.ds = new MailParser();
                             this.setUpMPCallback(this.body.headers);
                             this.body.ds.feed(this.body.headerStr.trim()+"\r\n\r\n");
-                            console.log("SENT TO CHILD:")
-                            console.log(this.body.headerStr+"\r\n\r\n");
                         }
                         
                         // BINARY
@@ -250,7 +244,6 @@ MailParser.prototype.parseBody = function(data){
 
                         
                         this.body.headerStr = "";
-                        this.body.list.push("HEADERS FOR ATTACHMENT #"+(++this.body.i)+":\n"+sys.inspect(this.body.headers, true, 5));
                     }else{
                         this.body.headerStr += data.substr(pos);
                         break;
@@ -259,11 +252,8 @@ MailParser.prototype.parseBody = function(data){
 
                 if(this.body.ds){
                     pos3 = data.indexOf("--"+this.headers.mimeBoundary, pos);
-                    console.log("FEEDING CHILD:")
-                    console.log(pos3>=0?data.substring(pos,pos3):data.substr(pos))
                     this.body.ds.feed(pos3>=0?data.substring(pos,pos3):data.substr(pos));
                     if(pos3>=0){
-                        console.log("FEED END")
                         this.body.ds.end();
                         this.body.ds = null;
                     }
@@ -332,13 +322,8 @@ MailParser.prototype.setUpDSCallback = function(headers){
 
 
 MailParser.prototype.setUpMPCallback = function(headers){
-    this.body.ds.on("headers", (function(data){
-        console.log("RECEIVED FROM CHILD (HEADERS):")
-        console.log(sys.inspect(data, false, 5));
-    }).bind(this));
+    this.body.ds.on("headers", (function(data){}).bind(this));
     this.body.ds.on("body", (function(data){
-        console.log("RECEIVED FROM CHILD (BODY):")
-        console.log(sys.inspect(data, false, 5));
         
         this.bodyData.attachments.push({
             contentType: headers.contentType,
@@ -371,8 +356,6 @@ MailParser.prototype.parseBodyEnd = function(){
     
     if(this.bodyData.bodyText && !!this.bodyData.bodyHTML)
         this.bodyData.bodyText = stripHTML(this.bodyData.bodyText);
-    
-    console.log(this.body.list.join("\n\n"));
     
     this.emit("body",this.bodyData);
     return false;
@@ -417,8 +400,6 @@ DataStore.prototype.onStream = function(buffer){
 }
 
 DataStore.prototype.onStreamEnd = function(){
-    console.log("CACHED BINARY DATA:")
-    console.log(sys.inspect(this.data, true, 5))
     this.emit("end", new Buffer(this.data,"base64"));
 }
 
@@ -429,8 +410,6 @@ DataStore.prototype.end = function(){
         if(this.encoding=="base64")
             this.data = mime.decodeBase64(this.data, this.charset).trim();
 
-        console.log("CACHED TEXT DATA:")
-        console.log(sys.inspect(this.data, true, 5))
         this.emit("end", this.data);
         
     }else{

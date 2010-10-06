@@ -53,12 +53,12 @@ SMTPServer.prototype.setUpRaiCommands = function(){
 
 
 SMTPServer.prototype.receiveHeaders = function(headers){
-    console.log("Mail headers:")
+    console.log("MAIL HEADERS:")
     console.log(sys.inspect(headers,false, 5));
 }
 
 SMTPServer.prototype.receiveBody = function(body){
-    console.log("FINAL MAIL BODY:")
+    console.log("MAIL BODY:")
     console.log(sys.inspect(body, false, 5));
 }
 
