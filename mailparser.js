@@ -99,6 +99,14 @@ MailParser.prototype.analyzeHeaders = function(headerObj, headers){
         parts = parseHeaderLine(headerObj["message-id"] && headerObj["message-id"][0]);
     }
     headers.messageId = (parts.defaultValue || "").replace(/^</, '').replace(/>*$/, '');
+
+    // content ID
+    headersUsed.push("content-id");
+    parts = {};
+    if(headerObj["content-id"]){
+        parts = parseHeaderLine(headerObj["content-id"] && headerObj["content-id"][0]);
+    }
+    headers.contentId = (parts.defaultValue || "").replace(/^</, '').replace(/>*$/, '');
     
     // date
     headersUsed.push("date");
@@ -217,25 +225,29 @@ MailParser.prototype.parseBody = function(data){
                         
                         console.log(sys.inspect(this.body.headers))
                         
+                        this.waitFor++;
                         
-                        if(
-                            this.body.headers.contentType.substr(0,"text/".length)=="text/" ||
-                            this.body.headers.contentType.substr(0,"multipart/".length)=="multipart/"
-                        )this.waitFor++;
-                        
-                        
+                        // TEXT
                         if(this.body.headers.contentType.substr(0,"text/".length)=="text/"){
                             this.body.ds = new DataStore("text", this.body.headers.contentTransferEncoding, this.body.headers.charset);
                             this.setUpDSCallback(this.body.headers);
                         }
                         
-                        if(this.body.headers.contentType.substr(0,"multipart/".length)=="multipart/"){
+                        // MULTIPART
+                        else if(this.body.headers.contentType.substr(0,"multipart/".length)=="multipart/"){
                             this.body.ds = new MailParser();
                             this.setUpMPCallback(this.body.headers);
                             this.body.ds.feed(this.body.headerStr.trim()+"\r\n\r\n");
                             console.log("SENT TO CHILD:")
                             console.log(this.body.headerStr+"\r\n\r\n");
                         }
+                        
+                        // BINARY
+                        else{
+                            this.body.ds = new DataStore("binary", this.body.headers.contentTransferEncoding, this.body.headers.charset);
+                            this.setUpDSCallback(this.body.headers);
+                        }
+
                         
                         this.body.headerStr = "";
                         this.body.list.push("HEADERS FOR ATTACHMENT #"+(++this.body.i)+":\n"+sys.inspect(this.body.headers, true, 5));
@@ -256,10 +268,6 @@ MailParser.prototype.parseBody = function(data){
                         this.body.ds = null;
                     }
                 }
-                
-                // handle body
-                // todo
-                // if multipart, create new MailParser, otherwise new DataStore
                 
             }
             
@@ -310,6 +318,7 @@ MailParser.prototype.setUpDSCallback = function(headers){
             this.bodyData.attachments.push({
                 contentType: headers.contentType,
                 contentDisposition: headers.contentDisposition,
+                contentId: headers.contentId,
                 filename: headers.filename,
                 body: data
             });
@@ -379,6 +388,14 @@ function DataStore(type, encoding, charset){
     this.encoding = encoding || "7bit";
     this.charset = charset || "us-ascii";
     this.data = "";
+    
+    this.stream = false;
+    if(this.type=="binary"){
+        // FIX: assumes that binary is always base64!
+        this.stream = new Base64Stream();
+        this.stream.on("stream", this.onStream.bind(this));
+        this.stream.on("end", this.onStreamEnd.bind(this));
+    }
 }
 sys.inherits(DataStore, EventEmitter);
 
@@ -392,7 +409,17 @@ DataStore.prototype.feedText = function(data){
 }
 
 DataStore.prototype.feedBinary = function(data){
-    
+    this.stream.feed(data);
+}
+
+DataStore.prototype.onStream = function(buffer){
+    this.data += buffer.toString("base64");
+}
+
+DataStore.prototype.onStreamEnd = function(){
+    console.log("CACHED BINARY DATA:")
+    console.log(sys.inspect(this.data, true, 5))
+    this.emit("end", new Buffer(this.data,"base64"));
 }
 
 DataStore.prototype.end = function(){
@@ -401,10 +428,14 @@ DataStore.prototype.end = function(){
             this.data = mime.decodeQuotedPrintable(this.data, false, this.charset).trim();
         if(this.encoding=="base64")
             this.data = mime.decodeBase64(this.data, this.charset).trim();
+
+        console.log("CACHED TEXT DATA:")
+        console.log(sys.inspect(this.data, true, 5))
+        this.emit("end", this.data);
+        
+    }else{
+        this.stream.end();
     }
-    console.log("CACHED DATA:")
-    console.log(sys.inspect(this.data, true, 5))
-    this.emit("end", this.data);
 }
 
 
@@ -415,7 +446,7 @@ function Base64Stream(){
 }
 sys.inherits(Base64Stream, EventEmitter);
 
-Base64Stream.prototype.push = function(data){
+Base64Stream.prototype.feed = function(data){
     var remainder = 0;
     this.current += data.replace(/[^\w+\/=]/g,'');
     this.emit("stream", new Buffer(this.current.substr(0, this.current.length - this.current.length % 4),"base64"));
