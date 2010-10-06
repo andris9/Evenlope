@@ -93,7 +93,8 @@ SMTPServer.prototype.commands = {
         
         // Check if command syntax is OK
         data = data && data.trim();
-        var address = data && data.substr("FROM:".length).trim();
+        var address = data && data.substr("FROM:".length).match(/<[^>]+>/);
+        address = address && address[0].trim();
         if(!data || !address || data.substr(0,"FROM:".length).toUpperCase()!="FROM:")
             return response("501 Error: Syntax: MAIL FROM:<address>");
         
@@ -128,7 +129,8 @@ SMTPServer.prototype.commands = {
         
         // Check if command syntax is OK
         data = data && data.trim();
-        var address = data && data.substr("TO:".length).trim();
+        var address = data && data.substr("TO:".length).match(/<[^>]+>/);
+        address = address && address[0].trim();
         if(!data || !address || data.substr(0,"TO:".length).toUpperCase()!="TO:")
             return response("501 Error: Syntax: RCPT TO:<address>");
         

@@ -168,6 +168,48 @@ MailParser.prototype.analyzeHeaders = function(headerObj, headers){
     }else
         headers.subject = headerObj["subject"] && headerObj["subject"][0] || "";
    
+    // priority
+    headersUsed.push("x-priority");
+    headersUsed.push("priority");
+    headersUsed.push("importance");
+    headersUsed.push("x-msmail-priority");
+    
+    headers.priority = 3;
+    if(headerObj["x-priority"]){
+        var nr = headerObj["x-priority"][0].match(/\d/);
+        nr = parseInt(nr && nr[0]);
+        if(nr>3)
+            headers.priority = 5;
+        if(nr<3)
+            headers.priority = 1;
+    }else if(headerObj["x-priority"] || headerObj["x-msmail-priority"]){
+        switch((headerObj["x-priority"] || headerObj["x-msmail-priority"])[0].toLowerCase().trim()){
+            case "low":
+                headers.priority = 5;
+                break;
+            case "normal":
+                headers.priority = 3;
+                break;
+            case "hight":
+                headers.priority = 1;
+                break;
+        }
+    }else if(headerObj["importance"]){
+        switch(headerObj["importance"][0].toLowerCase().trim()){
+            case "non-urgent":
+                headers.priority = 5;
+                break;
+            case "normal":
+                headers.priority = 3;
+                break;
+            case "urgent":
+                headers.priority = 1;
+                break;
+        }
+    }
+    
+    
+    
     // content-disposition
     headersUsed.push("content-disposition");
     parts = {};
