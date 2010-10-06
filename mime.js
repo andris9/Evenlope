@@ -276,7 +276,7 @@ this.parseAddresses = function(addresses){
     if(!addresses)
         return {};
 
-    addresses = addresses.replace(/=\?[^?]+\?[QB]\?[^?]+\?=/g, (function(a){return this.decodeMimeWord(a)}).bind(this));
+    addresses = addresses.replace(/=\?[^?]+\?[QqBb]\?[^?]+\?=/g, (function(a){return this.decodeMimeWord(a)}).bind(this));
     
     // not sure if it's even needed - urlencode escaped \\ and \" and \'
     addresses = addresses.replace(/\\\\/g,function(a){return escape(a.charAt(1))});

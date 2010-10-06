@@ -35,12 +35,13 @@ MailParser.prototype.feed = function(data){
 }
 
 MailParser.prototype.end = function(){
-    if(this.waitFor || !this.receivedAll)
+    if(this.headers.multipart && (this.waitFor || !this.receivedAll))
         return;
     
     if(this.state == PARSE_BODY){
         this.parseBodyEnd();
     }
+    
     this.emit("end");
 }
 
@@ -162,9 +163,9 @@ MailParser.prototype.analyzeHeaders = function(headerObj, headers){
     
     // subject
     headersUsed.push("subject");
-    if(headers.useMime)
-        headers.subject = mime.decodeMimeWord(headerObj["subject"] && headerObj["subject"][0] || "");
-    else
+    if(headers.useMime){
+        headers.subject = parseMimeWords(headerObj["subject"] && headerObj["subject"][0] || "");
+    }else
         headers.subject = headerObj["subject"] && headerObj["subject"][0] || "";
    
     // content-disposition
@@ -500,6 +501,12 @@ function stripHTML(str){
     // restore hidden spaces (four (r) signs for two spaces)
     str = str.replace(/-®®®®-/g,"  ");
     return str.trim();
+}
+
+function parseMimeWords(str){
+    return str.replace(/=\?[^?]+\?[QqBb]\?[^?]+\?=/g, function(a){
+        return mime.decodeMimeWord(a);
+    });
 }
 
 function parseHeaderLine(line){
