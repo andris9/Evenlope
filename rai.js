@@ -119,7 +119,7 @@ RaiInstance.prototype.parseIncoming = function(request){
 }
 
 RaiInstance.prototype.runCommand = function(name, payload){
-    console.log("Command: "+name+", with '"+(payload?payload.trim():"-")+"'");
+    //console.log("Command: "+name+", with '"+(payload?payload.trim():"-")+"'");
     
     if(this.server.commands[name]){
         this.server.commands[name](payload, (function(response, useStream, setSecure){

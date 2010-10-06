@@ -83,13 +83,13 @@ MailParser.prototype.analyzeHeaders = function(headerObj, headers){
     headers.format = parts.format && parts.format.toLowerCase() || "fixed";
     
     // filename
-    headers.filename = parts.name && parts.name.replace(/['"]/g,"").trim() || false;
+    headers.filename = parts.name && parseMimeWords(parts.name.replace(/^[\s"']+|[\s"']+$/g,"")).trim() || false;
     
     // mime-boundary
     headers.multipart = false;
     headers.mimeBoundary = false;
     if(headers.contentType.substr(0,"multipart/".length)=="multipart/"){
-        headers.mimeBoundary = parts.boundary.replace(/['"]/g,"").trim();
+        headers.mimeBoundary = parts.boundary.replace(/^[\s"']+|[\s"']+$/g,"").trim();
         headers.multipart = true;
     }
     
@@ -219,7 +219,7 @@ MailParser.prototype.analyzeHeaders = function(headerObj, headers){
     headers.contentDisposition = parts.defaultValue || false;
     
     if(!headers.filename && parts.filename)
-        headers.filename = parts.filename.replace(/['"]/g,"").trim();
+        headers.filename = parseMimeWords(parts.filename.replace(/^[\s"']+|[\s"']+$/g,"")).trim();
     
     headers.secondary = [];
     var keys = Object.keys(headerObj);
@@ -417,6 +417,7 @@ function DataStore(type, encoding, charset){
     
     this.stream = false;
     if(this.type=="binary"){
+        this.data = 0;
         // FIX: assumes that binary is always base64!
         this.stream = new Base64Stream();
         this.stream.on("stream", this.onStream.bind(this));
@@ -439,11 +440,11 @@ DataStore.prototype.feedBinary = function(data){
 }
 
 DataStore.prototype.onStream = function(buffer){
-    this.data += buffer.toString("base64");
+    this.data += buffer.length;
 }
 
 DataStore.prototype.onStreamEnd = function(){
-    this.emit("end", new Buffer(this.data,"base64"));
+    this.emit("end", this.data+" bytes");
 }
 
 DataStore.prototype.end = function(){

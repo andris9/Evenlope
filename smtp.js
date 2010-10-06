@@ -175,7 +175,7 @@ SMTPServer.prototype.commands = {
             // Check if no valid recipients
             if(!client.data.rcptList.length)
                 return response("503 Error: No valid recipients");
-        
+
             client.data.mailParser = new mailparser.MailParser(client.data.mailFrom, client.data.rcptList);
             client.data.mailParser.on("headers", this.receiveHeaders.bind(this));
             client.data.mailParser.on("body", this.receiveBody.bind(this));
