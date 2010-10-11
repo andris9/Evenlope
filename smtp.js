@@ -16,7 +16,7 @@ var SMTPServer = function(options){
     this.options.onClientError = this.onClientError.bind(this);
     
     this.domainName = options.domainName || "localhost";
-    this.capabilities = ["SIZE 10240000"];
+    this.capabilities = ["SIZE 10240000"]; // actually not used
     
     // If not TLS mode but has the capability, add STLS to the capabilities list
     if(!this.options.useTLS && (this.options.credentials || (this.options.privateKey && this.options.certificate))){
@@ -40,6 +40,7 @@ SMTPServer.prototype.onClientError = function(err, client){
 
 SMTPServer.prototype.onGreeting = function(client){
     client.data.instanceID = ++__incrementator;
+    client.data.mailFrom = false;
     client.data.rcptList = [];
     return "220 fw.node.ee ESMTP N3";
 }
@@ -88,24 +89,31 @@ SMTPServer.prototype.commands = {
             return response("503 Error: Send HELO/EHLO first");
         
         // Check if MAIL FROM: was already issued
-        if(client.data.mailFrom)
+        if(client.data.mailFrom!==false)
             return response("503 Error: Nested MAIL command");
         
         // Check if command syntax is OK
         data = data && data.trim();
-        var address = data && data.substr("FROM:".length).match(/<[^>]+>/);
+        var address = data && data.substr("FROM:".length).match(/<[^>]*>/);
         address = address && address[0].trim();
         if(!data || !address || data.substr(0,"FROM:".length).toUpperCase()!="FROM:")
             return response("501 Error: Syntax: MAIL FROM:<address>");
         
         // Check if address is enclosed with < and >
-        if(address.length<=2 || address.charAt(0)!="<" || address.charAt(address.length-1)!=">")
+        if(address.length<2 || address.charAt(0)!="<" || address.charAt(address.length-1)!=">")
             return response("501 Error: Bad sender address syntax");
         
         // Check if mail address validates by RFC822
         address = address.substr(1, address.length-2).trim();
-        if(!validateEmail(address))
+        if(address && !validateEmail(address))
             return response("504 <"+address+">: Sender address rejected: need fully-qualified address");
+        
+        // If address is empty, treat it as a bounce
+        if(!address){
+            client.data.mailFrom = "";
+            response("250 OK");
+            return;
+        }
         
         var parts = address.split("@"),
             user = parts[0],
@@ -124,7 +132,7 @@ SMTPServer.prototype.commands = {
     
     RCPT: function(data, response, client){
         // Check if MAIL FROM: is issued
-        if(!client.data.mailFrom)
+        if(client.data.mailFrom===false)
             return response("503 Error: Need MAIL command");
         
         // Check if command syntax is OK
@@ -154,6 +162,8 @@ SMTPServer.prototype.commands = {
             user = parts[0],
             domain = parts[1];
         
+        // TODO: If sender address is empty, check if recipient address is a bounce!
+        
         // Check if domain exists
         dns.resolveMx(domain, function(err, addresses){
             if(err || !addresses || !addresses.length)
@@ -169,7 +179,7 @@ SMTPServer.prototype.commands = {
     DATA: function(data, response, client){
         if(!client.streamStep){ // NORMAL
             // Check if MAIL FROM: is issued
-            if(!client.data.mailFrom)
+            if(client.data.mailFrom===false)
                 return response("503 Error: Need RCPT command");
             
             // Check if no valid recipients
@@ -192,7 +202,7 @@ SMTPServer.prototype.commands = {
     },
     
     STATUS: function(data, response, client){
-        if(!client.data.mailFrom)
+        if(client.data.mailFrom===false)
             return response("No data yet")
         response("FROM: "+client.data.mailFrom);
         for(var i=0; i<client.data.rcptList.length;i++){
