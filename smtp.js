@@ -1,7 +1,7 @@
 var rai = require("./rai"),
     auth = require("./auth"),
     dns = require('dns'),
-    mailparser = require('./mailparser'),
+    mailparser = require('../mailparser/mailparser'),
     sys = require('sys');
 
 var __incrementator = 0;
