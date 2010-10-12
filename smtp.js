@@ -2,12 +2,16 @@ var rai = require("./rai"),
     auth = require("./auth"),
     dns = require('dns'),
     mailparser = require('../mailparser/mailparser'),
-    sys = require('sys');
+    sys = require('sys'),
+    simplemongo = require("./simplemongo");
 
 var __incrementator = 0;
 
+var mongoDb = new simplemongo.SimpleMongo("remotetest");
+
+
 var SMTPServer = function(options){
-    options = options || {};
+    options = options || {};
     if(!options.port)options.port = 25;
     this.options = options;
     
@@ -55,12 +59,43 @@ SMTPServer.prototype.setUpRaiCommands = function(){
 
 SMTPServer.prototype.receiveHeaders = function(headers){
     console.log("MAIL HEADERS:")
-    console.log(sys.inspect(headers,false, 5));
+    console.log(sys.inspect(headers,false, 7));
 }
 
 SMTPServer.prototype.receiveBody = function(body){
     console.log("MAIL BODY:")
-    console.log(sys.inspect(body, false, 5));
+    console.log(sys.inspect(body, false, 7));
+}
+
+
+// korraga salvestatakse mitut striimi
+SMTPServer.prototype.attachmentStart = function(id, headers){
+    console.log("ATTACHMENT START")
+    console.log(sys.inspect(headers,false, 7));
+    this.curWriter = new simplemongo.StreamWriter(mongoDb, id, {content_type: headers.contentType});
+    this.curWriter.on("opened", function(){
+        console.log("opened")
+    })
+    this.curWriter.on("error", function(err){
+        console.log("error "+err)
+    })
+    
+    this.curWriter.on("end", function(){
+        console.log("ended")
+    })
+    console.log(mongoDb, id,  {content_type: headers.contentType})
+}
+
+SMTPServer.prototype.attachmentStream = function(id, data){
+    console.log("ATTACHMENT STREAM")
+    this.curWriter.feed(data);
+    console.log(data);
+}
+
+SMTPServer.prototype.attachmentEnd = function(id, data){
+    console.log("ATTACHMENT END")
+    this.curWriter.end();
+    this.curWriter = null;
 }
 
 SMTPServer.prototype.commands = {
@@ -189,6 +224,10 @@ SMTPServer.prototype.commands = {
             client.data.mailParser = new mailparser.MailParser(client.data.mailFrom, client.data.rcptList);
             client.data.mailParser.on("headers", this.receiveHeaders.bind(this));
             client.data.mailParser.on("body", this.receiveBody.bind(this));
+            
+            client.data.mailParser.on("astart", this.attachmentStart.bind(this));
+            client.data.mailParser.on("astream", this.attachmentStream.bind(this));
+            client.data.mailParser.on("aend", this.attachmentEnd.bind(this));
             
             return response("354 End data with <CR><LF>.<CR><LF>", true);
         }else{ // STREAM
