@@ -243,7 +243,6 @@ StreamWriter.prototype.feed = function(data){
 StreamWriter.prototype.writeFile = function(data){
     
     this.gs.write(data, (function(err, result){
-    console.log(1)
         if(!!err && !result){
             this.onError(err);
             return;

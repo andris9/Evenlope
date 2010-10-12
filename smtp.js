@@ -89,7 +89,7 @@ SMTPServer.prototype.attachmentStart = function(id, headers){
 SMTPServer.prototype.attachmentStream = function(id, data){
     console.log("ATTACHMENT STREAM")
     this.curWriter.feed(data);
-    console.log(data);
+    console.log(data.length+" bytes");
 }
 
 SMTPServer.prototype.attachmentEnd = function(id, data){

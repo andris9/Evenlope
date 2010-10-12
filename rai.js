@@ -86,7 +86,7 @@ RaiInstance.prototype.setHandlers = function(){
 
 RaiInstance.prototype.receiveData = function(data){
     var request = data.toString("ascii", 0, data.length);
-    console.log("CLIENT: "+request.trim());
+    //console.log("CLIENT: "+request.trim());
     this.parseIncoming(request);
 }
 
